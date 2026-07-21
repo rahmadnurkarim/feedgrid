@@ -493,14 +493,33 @@
         setTimeout(() => setToastMessage(null), 3500);
       };
 
-      const handleCopySnippet = () => {
+      // Helper function for reliable cross-browser clipboard copying in iframe environments
+      const copyTextToClipboard = (textToCopy) => {
         try {
-          navigator.clipboard.writeText(CONSOLE_SCRAPER_SCRIPT);
+          const textArea = document.createElement("textarea");
+          textArea.value = textToCopy;
+          textArea.style.position = "fixed";
+          textArea.style.top = "-9999px";
+          textArea.style.left = "-9999px";
+          document.body.appendChild(textArea);
+          textArea.focus();
+          textArea.select();
+          const successful = document.execCommand('copy');
+          document.body.removeChild(textArea);
+          return successful;
+        } catch (err) {
+          return false;
+        }
+      };
+
+      const handleCopySnippet = () => {
+        const isCopied = copyTextToClipboard(CONSOLE_SCRAPER_SCRIPT);
+        if (isCopied) {
           setCopiedSnippet(true);
           showToast("✅ Snippet Script berhasil disalin ke Clipboard!");
           setTimeout(() => setCopiedSnippet(false), 2500);
-        } catch(e) {
-          showToast("⚠️ Gagal menyalin secara otomatis. Silakan salin manual dari kotak teks.");
+        } else {
+          showToast("⚠️ Gagal menyalin otomatis. Silakan salin manual dari kotak teks.");
         }
       };
 
