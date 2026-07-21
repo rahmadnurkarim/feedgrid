@@ -95,65 +95,136 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // --- CONSOLE SCRAPER SCRIPT STRING ---
+    // --- CONSOLE SCRAPER SCRIPT STRING (UPGRADED VERSION 3.0 WITH DEEP SEARCH & DOM FALLBACK) ---
     const CONSOLE_SCRAPER_SCRIPT = `(function extractInstagramFeedPayload() {
   try {
-    console.log("%c[InstaVault Pro]%c Memulai ekstraksi data feed...", "color: #E1306C; font-weight: bold; font-size: 14px;", "color: #fff;");
+    console.log("%c[InstaVault Pro 3.0]%c Memulai ekstraksi data feed mendalam...", "color: #E1306C; font-weight: bold; font-size: 14px;", "color: #fff;");
     
     let rawItems = [];
     let profileData = { username: "unknown", fullName: "", biography: "", avatarUrl: "", postsCount: 0 };
 
-    if (window.__additionalData && Object.keys(window.__additionalData).length > 0) {
-      for (const key in window.__additionalData) {
-        const dataObj = window.__additionalData[key];
-        if (dataObj?.data?.user) {
-          const user = dataObj.data.user;
-          profileData.username = user.username || "unknown";
-          profileData.fullName = user.full_name || "";
-          profileData.biography = user.biography || "";
-          profileData.avatarUrl = user.profile_pic_url_hd || user.profile_pic_url || "";
-          profileData.postsCount = user.edge_owner_to_timeline_media?.count || 0;
-          rawItems = user.edge_owner_to_timeline_media?.edges || [];
-          break;
+    // Helper: Recursive Deep Search Object
+    function deepSearch(obj, keyToFind, maxDepth = 10, currentDepth = 0) {
+      if (!obj || currentDepth > maxDepth || typeof obj !== 'object') return [];
+      let results = [];
+      if (Array.isArray(obj)) {
+        for (const item of obj) {
+          results = results.concat(deepSearch(item, keyToFind, maxDepth, currentDepth + 1));
+        }
+      } else {
+        for (const k in obj) {
+          if (k === keyToFind && obj[k]) {
+            results.push(obj[k]);
+          }
+          if (typeof obj[k] === 'object' && obj[k] !== null) {
+            results = results.concat(deepSearch(obj[k], keyToFind, maxDepth, currentDepth + 1));
+          }
         }
       }
+      return results;
     }
 
-    if (rawItems.length === 0 && window._sharedData?.entry_data?.ProfilePage) {
-      const user = window._sharedData.entry_data.ProfilePage[0]?.graphql?.user;
-      if (user) {
-        profileData.username = user.username || "unknown";
-        profileData.fullName = user.full_name || "";
-        profileData.biography = user.biography || "";
-        profileData.avatarUrl = user.profile_pic_url_hd || user.profile_pic_url || "";
-        profileData.postsCount = user.edge_owner_to_timeline_media?.count || 0;
-        rawItems = user.edge_owner_to_timeline_media?.edges || [];
-      }
+    // Detect Username from URL Path
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    if (pathParts.length > 0 && !["explore", "reels", "direct", "stories", "p", "tv"].includes(pathParts[0])) {
+      profileData.username = pathParts[0];
     }
 
-    if (rawItems.length === 0) {
-      const scripts = Array.from(document.querySelectorAll('script[type="application/json"]'));
-      for (const script of scripts) {
-        if (script.textContent && script.textContent.includes('edge_owner_to_timeline_media')) {
-          try {
-            const parsed = JSON.parse(script.textContent);
-            const user = parsed?.require?.[0]?.[3]?.[0]?.ariaData?.graphql?.user || 
-                         parsed?.data?.user || 
-                         parsed?.graphql?.user;
-            if (user) {
-              profileData.username = user.username || profileData.username;
-              profileData.fullName = user.full_name || profileData.fullName;
-              profileData.avatarUrl = user.profile_pic_url_hd || user.profile_pic_url || profileData.avatarUrl;
-              rawItems = user.edge_owner_to_timeline_media?.edges || [];
-              if (rawItems.length > 0) break;
+    // Strategy 1: Scan All JSON Script Tags
+    const scripts = Array.from(document.querySelectorAll('script'));
+    for (const script of scripts) {
+      if (!script.textContent) continue;
+      
+      if (script.type === 'application/json' || script.textContent.includes('edge_owner_to_timeline_media') || script.textContent.includes('xdt_api') || script.textContent.includes('profile_pic_url')) {
+        try {
+          const parsed = JSON.parse(script.textContent);
+          
+          // Search User Metadata
+          const users = deepSearch(parsed, 'user');
+          for (const u of users) {
+            if (u && (u.username || u.full_name)) {
+              profileData.username = u.username || profileData.username;
+              profileData.fullName = u.full_name || profileData.fullName || "";
+              profileData.biography = u.biography || profileData.biography || "";
+              profileData.avatarUrl = u.profile_pic_url_hd || u.profile_pic_url || profileData.avatarUrl;
+              profileData.postsCount = u.edge_owner_to_timeline_media?.count || u.media_count || profileData.postsCount;
+              break;
             }
-          } catch (e) {}
+          }
+
+          // Search Timeline Edges & Connections
+          const edgesList = deepSearch(parsed, 'edge_owner_to_timeline_media');
+          for (const edgeObj of edgesList) {
+            if (edgeObj?.edges && edgeObj.edges.length > 0) {
+              rawItems = rawItems.concat(edgeObj.edges);
+            }
+          }
+
+          if (rawItems.length === 0) {
+            const xdtFeeds = deepSearch(parsed, 'xdt_api__v1__feed__user_timeline_graphql_connection');
+            for (const xdt of xdtFeeds) {
+              if (xdt?.edges && xdt.edges.length > 0) {
+                rawItems = rawItems.concat(xdt.edges);
+              }
+            }
+          }
+
+          if (rawItems.length === 0) {
+            const itemsList = deepSearch(parsed, 'items');
+            for (const it of itemsList) {
+              if (Array.isArray(it) && it.length > 0 && (it[0]?.code || it[0]?.pk || it[0]?.id)) {
+                rawItems = rawItems.concat(it.map(node => ({ node })));
+              }
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    // Strategy 2: Global Window State Fallback
+    if (rawItems.length === 0) {
+      if (window.__additionalData) {
+        const foundEdges = deepSearch(window.__additionalData, 'edges');
+        if (foundEdges.length > 0) rawItems = foundEdges[0];
+      }
+      if (window._sharedData) {
+        const foundEdges = deepSearch(window._sharedData, 'edges');
+        if (foundEdges.length > 0) rawItems = foundEdges[0];
+      }
+    }
+
+    // Strategy 3: DOM Fallback (Extract Visible Feed Media Elements)
+    if (rawItems.length === 0) {
+      console.log("%c[InstaVault Pro]%c Menjalankan Fallback DOM Extraction...", "color: #FCB045;", "color: #fff;");
+      const mediaElements = Array.from(document.querySelectorAll('img[src*="cdninstagram"], video[src*="cdninstagram"], img[src*="fbcdn"], video[src*="fbcdn"]'));
+      
+      const domItems = [];
+      mediaElements.forEach((el, index) => {
+        const isVideo = el.tagName.toLowerCase() === 'video';
+        const src = el.src || el.currentSrc;
+        if (src && !src.includes('150x150') && !src.includes('448x448') && !src.includes('profile_pic')) {
+          domItems.push({
+            node: {
+              id: 'dom_item_' + index,
+              shortcode: 'post_' + (index + 1),
+              is_video: isVideo,
+              display_url: src,
+              video_url: isVideo ? src : null,
+              edge_media_to_caption: { edges: [{ node: { text: el.alt || ("Instagram Post Media #" + (index + 1)) } }] },
+              edge_liked_by: { count: 0 },
+              edge_media_to_comment: { count: 0 },
+              taken_at_timestamp: Math.floor(Date.now() / 1000)
+            }
+          });
         }
+      });
+      if (domItems.length > 0) {
+        rawItems = domItems;
       }
     }
 
     const payload = {
-      instavaultVersion: "2.0",
+      instavaultVersion: "3.0",
       extractedAt: new Date().toISOString(),
       profile: profileData,
       items: rawItems
@@ -161,14 +232,21 @@
 
     const jsonString = JSON.stringify(payload, null, 2);
     
-    navigator.clipboard.writeText(jsonString).then(() => {
-      console.log("%c[SUCCESS]%c JSON Feed berhasil disalin ke Clipboard! Tempelkan (Paste) di InstaVault Pro.", "color: #00FF66; font-weight: bold;", "color: #fff;");
-    }).catch(() => {
-      console.log(jsonString);
-    });
+    if (rawItems.length === 0) {
+      alert("⚠️ Belum ada feed media yang terdeteksi.\\n\\nTips: Scroll halaman profil Instagram ke bawah sedikit agar foto/video dimuat ke browser, lalu jalankan script ini kembali di Console!");
+    } else {
+      navigator.clipboard.writeText(jsonString).then(() => {
+        console.log(\`%c[SUCCESS]%c \${rawItems.length} media feed (@\${profileData.username}) berhasil disalin ke Clipboard! Tempelkan di InstaVault Pro.\`, "color: #00FF66; font-weight: bold;", "color: #fff;");
+        alert(\`🎉 BERHASIL! \${rawItems.length} media feed dari @\${profileData.username} telah disalin ke Clipboard.\\n\\nSilakan kembali ke InstaVault Pro dan Paste di kotak JSON!\`);
+      }).catch(() => {
+        console.log(jsonString);
+        alert(\`🎉 BERHASIL! \${rawItems.length} item media ditemukan. Silakan salin teks JSON dari Console.\`);
+      });
+    }
 
   } catch (err) {
     console.error("[InstaVault Scraper Error]:", err);
+    alert("❌ Terjadi kesalahan saat ekstraksi. Coba scroll halaman Instagram lalu jalankan ulang script.");
   }
 })();`;
 
