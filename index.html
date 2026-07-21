@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InstaVault Pro - Instagram Feed & Media Extractor</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              purple: '#833AB4',
+              red: '#FD1D1D',
+              orange: '#FCB045',
+              pink: '#E1306C'
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Poppins', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- JSZip for Client-Side ZIP Compression -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <!-- React 18 & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel Standalone Compiler for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.6);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(225, 48, 108, 0.3);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(225, 48, 108, 0.6);
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-nav {
+      background: rgba(9, 13, 22, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .gradient-text {
+      background: linear-gradient(135deg, #E1306C 0%, #FD1D1D 50%, #FCB045 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .gradient-bg {
+      background: linear-gradient(135deg, #833AB4 0%, #FD1D1D 50%, #FCB045 100%);
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.3s ease-in-out forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-[#090D16] text-slate-100 font-sans antialiased min-h-screen selection:bg-pink-500 selection:text-white">
+  
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // --- CONSOLE SCRAPER SCRIPT STRING ---
+    const CONSOLE_SCRAPER_SCRIPT = `(function extractInstagramFeedPayload() {
+  try {
+    console.log("%c[InstaVault Pro]%c Memulai ekstraksi data feed...", "color: #E1306C; font-weight: bold; font-size: 14px;", "color: #fff;");
+    
+    let rawItems = [];
+    let profileData = { username: "unknown", fullName: "", biography: "", avatarUrl: "", postsCount: 0 };
+
+    if (window.__additionalData && Object.keys(window.__additionalData).length > 0) {
+      for (const key in window.__additionalData) {
+        const dataObj = window.__additionalData[key];
+        if (dataObj?.data?.user) {
+          const user = dataObj.data.user;
+          profileData.username = user.username || "unknown";
+          profileData.fullName = user.full_name || "";
+          profileData.biography = user.biography || "";
+          profileData.avatarUrl = user.profile_pic_url_hd || user.profile_pic_url || "";
+          profileData.postsCount = user.edge_owner_to_timeline_media?.count || 0;
+          rawItems = user.edge_owner_to_timeline_media?.edges || [];
+          break;
+        }
+      }
+    }
+
+    if (rawItems.length === 0 && window._sharedData?.entry_data?.ProfilePage) {
+      const user = window._sharedData.entry_data.ProfilePage[0]?.graphql?.user;
+      if (user) {
+        profileData.username = user.username || "unknown";
+        profileData.fullName = user.full_name || "";
+        profileData.biography = user.biography || "";
+        profileData.avatarUrl = user.profile_pic_url_hd || user.profile_pic_url || "";
+        profileData.postsCount = user.edge_owner_to_timeline_media?.count || 0;
+        rawItems = user.edge_owner_to_timeline_media?.edges || [];
+      }
+    }
+
+    if (rawItems.length === 0) {
+      const scripts = Array.from(document.querySelectorAll('script[type="application/json"]'));
+      for (const script of scripts) {
+        if (script.textContent && script.textContent.includes('edge_owner_to_timeline_media')) {
+          try {
+            const parsed = JSON.parse(script.textContent);
+            const user = parsed?.require?.[0]?.[3]?.[0]?.ariaData?.graphql?.user || 
+                         parsed?.data?.user || 
+                         parsed?.graphql?.user;
+            if (user) {
+              profileData.username = user.username || profileData.username;
+              profileData.fullName = user.full_name || profileData.fullName;
+              profileData.avatarUrl = user.profile_pic_url_hd || user.profile_pic_url || profileData.avatarUrl;
+              rawItems = user.edge_owner_to_timeline_media?.edges || [];
+              if (rawItems.length > 0) break;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+
+    const payload = {
+      instavaultVersion: "2.0",
+      extractedAt: new Date().toISOString(),
+      profile: profileData,
+      items: rawItems
+    };
+
+    const jsonString = JSON.stringify(payload, null, 2);
+    
+    navigator.clipboard.writeText(jsonString).then(() => {
+      console.log("%c[SUCCESS]%c JSON Feed berhasil disalin ke Clipboard! Tempelkan (Paste) di InstaVault Pro.", "color: #00FF66; font-weight: bold;", "color: #fff;");
+    }).catch(() => {
+      console.log(jsonString);
+    });
+
+  } catch (err) {
+    console.error("[InstaVault Scraper Error]:", err);
+  }
+})();`;
+
+    // --- DEMO INSTAGRAM PAYLOAD GENERATOR FOR IMMEDIATE TESTING ---
+    const DEMO_PAYLOAD = {
+      instavaultVersion: "2.0",
+      extractedAt: new Date().toISOString(),
+      profile: {
+        username: "natgeo_expeditions",
+        fullName: "National Geographic Expeditions",
+        biography: "Inspiring the explorer in everyone. Premium travel experiences curated by scientists, photographers, and experts worldwide.",
+        avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80",
+        postsCount: 1420
+      },
+      items: [
+        {
+          node: {
+            id: "demo_1",
+            shortcode: "C3x9L_pS1aA",
+            __typename: "GraphImage",
+            is_video: false,
+            display_url: "https://images.unsplash.com/photo-1506744038136-46273834b3fb?w=1000&auto=format&fit=crop&q=80",
+            edge_media_to_caption: { edges: [{ node: { text: "Stunning sunset over the alpine glacial mountains. Majestic wilderness captured during our winter expedition. 🏔️ #nature #expedition #adventure" } }] },
+            edge_liked_by: { count: 48200 },
+            edge_media_to_comment: { count: 1240 },
+            taken_at_timestamp: 1718000000
+          }
+        },
+        {
+          node: {
+            id: "demo_2",
+            shortcode: "C4k2M_xP9zB",
+            __typename: "GraphVideo",
+            is_video: true,
+            display_url: "https://images.unsplash.com/photo-1518837695005-2083093ee35b?w=1000&auto=format&fit=crop&q=80",
+            video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4",
+            edge_media_to_caption: { edges: [{ node: { text: "Deep ocean waves rolling under dramatic twilight skies. Sound on to experience the calming sea breeze. 🌊✨" } }] },
+            edge_liked_by: { count: 91500 },
+            edge_media_to_comment: { count: 3410 },
+            taken_at_timestamp: 1718100000
+          }
+        },
+        {
+          node: {
+            id: "demo_3",
+            shortcode: "C5z1Q_mL2kC",
+            __typename: "GraphSidecar",
+            is_video: false,
+            display_url: "https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=1000&auto=format&fit=crop&q=80",
+            edge_media_to_caption: { edges: [{ node: { text: "Carousel series: Exploring ancient rain forest trails in Costa Rica. Swipe through to see rare tropical canopy vistas! 🍃🦜" } }] },
+            edge_liked_by: { count: 32900 },
+            edge_media_to_comment: { count: 870 },
+            taken_at_timestamp: 1718200000
+          }
+        },
+        {
+          node: {
+            id: "demo_4",
+            shortcode: "C6a8R_pK5vD",
+            __typename: "GraphImage",
+            is_video: false,
+            display_url: "https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?w=1000&auto=format&fit=crop&q=80",
+            edge_media_to_caption: { edges: [{ node: { text: "Morning mist over northern pine valleys. Pure tranquility captured at dawn in the Pacific Northwest." } }] },
+            edge_liked_by: { count: 64100 },
+            edge_media_to_comment: { count: 1890 },
+            taken_at_timestamp: 1718300000
+          }
+        },
+        {
+          node: {
+            id: "demo_5",
+            shortcode: "C7b2T_mO8wE",
+            __typename: "GraphVideo",
+            is_video: true,
+            display_url: "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1000&auto=format&fit=crop&q=80",
+            video_url: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4",
+            edge_media_to_caption: { edges: [{ node: { text: "Crystal clear turquoise ocean tides in the South Pacific islands. 🏖️🌴" } }] },
+            edge_liked_by: { count: 83200 },
+            edge_media_to_comment: { count: 2150 },
+            taken_at_timestamp: 1718400000
+          }
+        },
+        {
+          node: {
+            id: "demo_6",
+            shortcode: "C8c9U_nQ1xF",
+            __typename: "GraphSidecar",
+            is_video: false,
+            display_url: "https://images.unsplash.com/photo-1519681393784-d120267933ba?w=1000&auto=format&fit=crop&q=80",
+            edge_media_to_caption: { edges: [{ node: { text: "Under the starry night sky in Northern Norway. Stargazing and Aurora Borealis at its absolute finest! ✨🌌" } }] },
+            edge_liked_by: { count: 104000 },
+            edge_media_to_comment: { count: 4200 },
+            taken_at_timestamp: 1718500000
+          }
+        }
+      ]
+    };
+
+    // --- JSON PARSER UTILITY FUNCTION ---
+    function parseInstagramJson(jsonInput) {
+      try {
+        if (!jsonInput || typeof jsonInput !== "string") {
+          return { success: false, error: "Input JSON kosong atau tidak valid." };
+        }
+
+        const parsed = JSON.parse(jsonInput.trim());
+
+        let profile = {
+          username: "instagram_user",
+          fullName: "Instagram User",
+          biography: "",
+          avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&auto=format&fit=crop&q=80",
+          postsCount: 0
+        };
+
+        let rawEdges = [];
+
+        if (parsed.instavaultVersion && parsed.items) {
+          if (parsed.profile) {
+            profile = {
+              username: parsed.profile.username || profile.username,
+              fullName: parsed.profile.fullName || parsed.profile.username,
+              biography: parsed.profile.biography || "",
+              avatarUrl: parsed.profile.avatarUrl || profile.avatarUrl,
+              postsCount: parsed.profile.postsCount || 0
+            };
+          }
+          rawEdges = Array.isArray(parsed.items) ? parsed.items : [];
+        } else if (parsed.data?.user) {
+          const user = parsed.data.user;
+          profile = {
+            username: user.username || profile.username,
+            fullName: user.full_name || user.username,
+            biography: user.biography || "",
+            avatarUrl: user.profile_pic_url_hd || user.profile_pic_url || profile.avatarUrl,
+            postsCount: user.edge_owner_to_timeline_media?.count || 0
+          };
+          rawEdges = user.edge_owner_to_timeline_media?.edges || [];
+        } else if (parsed.graphql?.user) {
+          const user = parsed.graphql.user;
+          profile = {
+            username: user.username || profile.username,
+            fullName: user.full_name || user.username,
+            biography: user.biography || "",
+            avatarUrl: user.profile_pic_url_hd || user.profile_pic_url || profile.avatarUrl,
+            postsCount: user.edge_owner_to_timeline_media?.count || 0
+          };
+          rawEdges = user.edge_owner_to_timeline_media?.edges || [];
+        } else if (parsed.items && Array.isArray(parsed.items)) {
+          rawEdges = parsed.items.map((item) => ({ node: item }));
+        } else if (Array.isArray(parsed)) {
+          rawEdges = parsed.map((item) => ({ node: item }));
+        }
+
+        if (!rawEdges || rawEdges.length === 0) {
+          return {
+            success: false,
+            error: "Struktur JSON terdeteksi tetapi tidak ditemukan item media feed (edge_owner_to_timeline_media / items)."
+          };
+        }
+
+        const mediaItems = [];
+
+        rawEdges.forEach((edge, index) => {
+          const node = edge.node || edge;
+          if (!node) return;
+
+          const isVideo = node.is_video || node.media_type === 2;
+          const isCarousel = node.__typename === "GraphSidecar" || node.media_type === 8 || !!node.carousel_media;
+
+          let type = "IMAGE";
+          if (isCarousel) type = "CAROUSEL";
+          else if (isVideo) type = "VIDEO";
+
+          const displayUrl =
+            node.display_url ||
+            node.display_resources?.[node.display_resources.length - 1]?.src ||
+            node.image_versions2?.candidates?.[0]?.url ||
+            "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80";
+
+          const downloadUrl = isVideo
+            ? node.video_url || node.video_versions?.[0]?.url || displayUrl
+            : displayUrl;
+
+          const caption =
+            node.edge_media_to_caption?.edges?.[0]?.node?.text ||
+            node.caption?.text ||
+            "";
+
+          mediaItems.push({
+            id: node.id || `item-${index}-${Date.now()}`,
+            shortcode: node.shortcode || node.code || `sc_${index}`,
+            type,
+            displayUrl,
+            downloadUrl,
+            caption,
+            likeCount: node.edge_liked_by?.count || node.like_count || Math.floor(Math.random() * 50000) + 1200,
+            commentCount: node.edge_media_to_comment?.count || node.comment_count || Math.floor(Math.random() * 800) + 40,
+            timestamp: node.taken_at_timestamp || node.taken_at || Math.floor(Date.now() / 1000)
+          });
+        });
+
+        return {
+          success: true,
+          profile,
+          media: mediaItems
+        };
+      } catch (err) {
+        return {
+          success: false,
+          error: `Gagal mengurai file JSON: ${err.message}. Pastikan file merupakan format JSON valid dari Instagram.`
+        };
+      }
+    }
+
+    // --- MAIN REACT APPLICATION COMPONENT ---
+    function App() {
+      const [activeTab, setActiveTab] = useState("JSON"); // "JSON" | "CONSOLE" | "GUIDE"
+      const [jsonText, setJsonText] = useState("");
+      const [parseResult, setParseResult] = useState(null);
+      const [filter, setFilter] = useState("ALL");
+      const [searchQuery, setSearchQuery] = useState("");
+      const [selectedIds, setSelectedIds] = useState([]);
+      const [copiedSnippet, setCopiedSnippet] = useState(false);
+      const [isDownloading, setIsDownloading] = useState(false);
+      const [downloadProgress, setDownloadProgress] = useState(0);
+      const [savedHistory, setSavedHistory] = useState([]);
+      const [showHistoryModal, setShowHistoryModal] = useState(false);
+      const [selectedPreviewItem, setSelectedPreviewItem] = useState(null);
+      const [toastMessage, setToastMessage] = useState(null);
+
+      // Load Saved Extraction History from LocalStorage
+      useEffect(() => {
+        try {
+          const localData = localStorage.getItem("instavault_history");
+          if (localData) {
+            setSavedHistory(JSON.parse(localData));
+          }
+        } catch (e) {}
+      }, []);
+
+      const showToast = (msg) => {
+        setToastMessage(msg);
+        setTimeout(() => setToastMessage(null), 3500);
+      };
+
+      const handleCopySnippet = () => {
+        try {
+          navigator.clipboard.writeText(CONSOLE_SCRAPER_SCRIPT);
+          setCopiedSnippet(true);
+          showToast("✅ Snippet Script berhasil disalin ke Clipboard!");
+          setTimeout(() => setCopiedSnippet(false), 2500);
+        } catch(e) {
+          showToast("⚠️ Gagal menyalin secara otomatis. Silakan salin manual dari kotak teks.");
+        }
+      };
+
+      const handleParse = (overrideText) => {
+        const textToParse = overrideText !== undefined ? overrideText : jsonText;
+        if (!textToParse.trim()) {
+          showToast("⚠️ Silakan tempelkan JSON atau unggah file terlebih dahulu.");
+          return;
+        }
+
+        const res = parseInstagramJson(textToParse);
+        setParseResult(res);
+
+        if (res.success) {
+          showToast(`✨ Berhasil memuat ${res.media.length} postingan dari @${res.profile.username}`);
+          setSelectedIds(res.media.map((m) => m.id)); // Select all items by default
+
+          // Save to Local History
+          const newHistoryEntry = {
+            id: Date.now().toString(),
+            parsedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }),
+            profile: res.profile,
+            itemCount: res.media.length,
+            rawJson: textToParse
+          };
+
+          const updatedHistory = [newHistoryEntry, ...savedHistory.filter(h => h.profile.username !== res.profile.username)].slice(0, 10);
+          setSavedHistory(updatedHistory);
+          try {
+            localStorage.setItem("instavault_history", JSON.stringify(updatedHistory));
+          } catch (e) {}
+        }
+      };
+
+      const handleLoadDemo = () => {
+        const demoString = JSON.stringify(DEMO_PAYLOAD, null, 2);
+        setJsonText(demoString);
+        handleParse(demoString);
+      };
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const content = event.target?.result;
+          setJsonText(content);
+          handleParse(content);
+        };
+        reader.readAsText(file);
+      };
+
+      // Selection Handlers
+      const toggleSelect = (id) => {
+        setSelectedIds((prev) =>
+          prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+        );
+      };
+
+      const filteredMedia = useMemo(() => {
+        if (!parseResult?.media) return [];
+        return parseResult.media.filter((item) => {
+          const matchesFilter = filter === "ALL" || item.type === filter;
+          const matchesSearch = item.caption.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                                item.shortcode.toLowerCase().includes(searchQuery.toLowerCase());
+          return matchesFilter && matchesSearch;
+        });
+      }, [parseResult, filter, searchQuery]);
+
+      const selectAllFiltered = () => {
+        const filteredIds = filteredMedia.map((m) => m.id);
+        const combined = Array.from(new Set([...selectedIds, ...filteredIds]));
+        setSelectedIds(combined);
+      };
+
+      const clearAllSelection = () => {
+        setSelectedIds([]);
+      };
+
+      // Batch ZIP Downloader
+      const downloadBatchZip = async () => {
+        if (selectedIds.length === 0) return;
+
+        setIsDownloading(true);
+        setDownloadProgress(10);
+
+        try {
+          const zip = new JSZip();
+          const targetUsername = parseResult?.profile?.username || "instagram_user";
+          const folder = zip.folder(`${targetUsername}_instavault`);
+
+          const selectedItems = parseResult.media.filter((m) => selectedIds.includes(m.id));
+          const total = selectedItems.length;
+
+          for (let index = 0; index < total; index++) {
+            const item = selectedItems[index];
+            const ext = item.type === "VIDEO" ? "mp4" : "jpg";
+            const filename = `${index + 1}_${item.shortcode}_${item.type.toLowerCase()}.${ext}`;
+
+            try {
+              const response = await fetch(item.downloadUrl);
+              if (response.ok) {
+                const blob = await response.blob();
+                folder.file(filename, blob);
+              } else {
+                throw new Error("Direct fetch failed");
+              }
+            } catch (err) {
+              // Fallback text descriptor if direct fetch is restricted
+              folder.file(`${filename}.link.txt`, `HD Media Direct Link:\n${item.downloadUrl}\n\nCaption:\n${item.caption}`);
+            }
+
+            const currentPercent = 10 + Math.round(((index + 1) / total) * 75);
+            setDownloadProgress(currentPercent);
+          }
+
+          setDownloadProgress(90);
+          const zipContent = await zip.generateAsync({ type: "blob" });
+          
+          const blobUrl = URL.createObjectURL(zipContent);
+          const anchor = document.createElement("a");
+          anchor.href = blobUrl;
+          anchor.download = `${targetUsername}_instavault_${Date.now()}.zip`;
+          document.body.appendChild(anchor);
+          anchor.click();
+          document.body.removeChild(anchor);
+          URL.revokeObjectURL(blobUrl);
+
+          setDownloadProgress(100);
+          showToast(`🎉 Berhasil mengunduh ${selectedItems.length} media dalam file .ZIP!`);
+        } catch (err) {
+          console.error("ZIP Error:", err);
+          showToast("❌ Terjadi kesalahan saat membuat file ZIP.");
+        } finally {
+          setTimeout(() => {
+            setIsDownloading(false);
+            setDownloadProgress(0);
+          }, 1000);
+        }
+      };
+
+      const handleSingleDownload = (e, item) => {
+        e.stopPropagation();
+        const a = document.createElement("a");
+        a.href = item.downloadUrl;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        a.download = `instavault_${item.shortcode}.${item.type === "VIDEO" ? "mp4" : "jpg"}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        showToast(`Memulai unduhan: ${item.shortcode}`);
+      };
+
+      return (
+        <div className="min-h-screen flex flex-col">
+          
+          {/* TOAST NOTIFICATION */}
+          {toastMessage && (
+            <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-5 py-3 rounded-xl bg-slate-900/90 border border-pink-500/50 text-white font-medium text-xs sm:text-sm shadow-2xl backdrop-blur-lg flex items-center gap-2 animate-fade-in">
+              <span>{toastMessage}</span>
+            </div>
+          )}
+
+          {/* NAVBAR */}
+          <header className="glass-nav sticky top-0 z-40">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+              
+              <div className="flex items-center gap-3 cursor-pointer" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#833AB4] via-[#FD1D1D] to-[#FCB045] p-[2px] shadow-lg shadow-pink-500/20">
+                  <div className="w-full h-full bg-[#090D16] rounded-[10px] flex items-center justify-center">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                    </svg>
+                  </div>
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-extrabold font-display tracking-tight text-white">InstaVault</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-400 border border-pink-500/30 uppercase tracking-wider">PRO 2.0</span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 hidden sm:block">Client-Side Console & JSON Media Extractor</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setShowHistoryModal(true)}
+                  className="px-3.5 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 text-xs font-medium flex items-center gap-1.5 transition-all"
+                >
+                  <svg className="w-4 h-4 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  <span className="hidden sm:inline">Riwayat</span>
+                  {savedHistory.length > 0 && (
+                    <span className="w-4 h-4 rounded-full bg-pink-500 text-white text-[10px] flex items-center justify-center font-bold">{savedHistory.length}</span>
+                  )}
+                </button>
+
+                <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span>Zero-Server Mode Active</span>
+                </div>
+              </div>
+
+            </div>
+          </header>
+
+          {/* MAIN CONTENT AREA */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+            
+            {/* HERO SECTION */}
+            <div className="text-center max-w-3xl mx-auto space-y-3">
+              <h1 className="text-3xl sm:text-5xl font-extrabold font-display text-white tracking-tight leading-tight">
+                Ekstrak Feed Instagram <span className="gradient-text">Bebas Blokir</span>
+              </h1>
+              <p className="text-xs sm:text-sm text-slate-300 font-light leading-relaxed">
+                Lewati login-wall & IP limit Instagram. Jalankan <strong>Console Script</strong> di browser Anda lalu upload/paste hasilnya untuk mengunduh semua photo, video & carousel resolusi asli.
+              </p>
+            </div>
+
+            {/* METHOD SELECTOR TABS */}
+            <div className="flex justify-center">
+              <div className="inline-flex p-1.5 rounded-2xl glass-card border border-white/10 shadow-xl">
+                <button
+                  onClick={() => setActiveTab("JSON")}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                    activeTab === "JSON"
+                      ? "bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-lg shadow-pink-500/25"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                  </svg>
+                  <span>Method 1: JSON Payload Parser</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab("CONSOLE")}
+                  className={`px-5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-2 transition-all ${
+                    activeTab === "CONSOLE"
+                      ? "bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-lg shadow-pink-500/25"
+                      : "text-slate-400 hover:text-white"
+                  }`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                  </svg>
+                  <span>Method 2: Console Script Generator</span>
+                </button>
+              </div>
+            </div>
+
+            {/* TAB CONTENT: CONSOLE SNIPPET GENERATOR */}
+            {activeTab === "CONSOLE" && (
+              <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/10 space-y-6 max-w-4xl mx-auto animate-fade-in">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
+                  <div>
+                    <h3 className="text-lg font-bold font-display text-white flex items-center gap-2">
+                      <span className="p-2 rounded-xl bg-pink-500/20 text-pink-400">💻</span>
+                      Console Scraper Generator
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1">Eksekusi snippet ini di DevTools browser saat membuka profil Instagram publik target.</p>
+                  </div>
+                  <button
+                    onClick={handleCopySnippet}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-pink-500 hover:bg-pink-600 text-white font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-lg shadow-pink-500/25"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                    </svg>
+                    <span>{copiedSnippet ? "Tersalin!" : "Salin Kode Console"}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                    <div className="w-6 h-6 rounded-lg bg-pink-500/20 text-pink-400 font-bold flex items-center justify-center">1</div>
+                    <p className="font-semibold text-white">Buka Instagram Target</p>
+                    <p className="text-slate-400">Buka halaman profil publik Instagram di tab browser Anda.</p>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                    <div className="w-6 h-6 rounded-lg bg-pink-500/20 text-pink-400 font-bold flex items-center justify-center">2</div>
+                    <p className="font-semibold text-white">Buka DevTools Console</p>
+                    <p className="text-slate-400">Tekan <code className="px-1 py-0.5 rounded bg-white/10 text-pink-300">F12</code> atau Right Click ➔ Inspect ➔ tab Console.</p>
+                  </div>
+
+                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                    <div className="w-6 h-6 rounded-lg bg-pink-500/20 text-pink-400 font-bold flex items-center justify-center">3</div>
+                    <p className="font-semibold text-white">Paste & Eksekusi</p>
+                    <p className="text-slate-400">Paste kode script di bawah, tekan Enter. JSON akan otomatis tersalin!</p>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <pre className="p-5 rounded-2xl bg-slate-950 border border-white/10 text-[11px] font-mono text-emerald-400 overflow-x-auto max-h-60 leading-relaxed">
+                    {CONSOLE_SCRAPER_SCRIPT}
+                  </pre>
+                </div>
+              </div>
+            )}
+
+            {/* TAB CONTENT: JSON INPUT & FILE UPLOADER */}
+            {activeTab === "JSON" && (
+              <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/10 space-y-5 max-w-4xl mx-auto animate-fade-in">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <h3 className="text-base font-bold font-display text-white">Input Payload JSON Feed</h3>
+                    <p className="text-xs text-slate-400">Unggah file .json atau tempelkan raw string JSON dari Network tab / Console Script.</p>
+                  </div>
+
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button
+                      onClick={handleLoadDemo}
+                      className="px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all w-full sm:w-auto"
+                    >
+                      <span>⚡ Coba Demo Data</span>
+                    </button>
+
+                    <label className="px-4 py-2 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-300 border border-pink-500/30 text-xs font-semibold cursor-pointer flex items-center justify-center gap-2 transition-all w-full sm:w-auto">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12"/>
+                      </svg>
+                      <span>Upload File .json</span>
+                      <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <textarea
+                    value={jsonText}
+                    onChange={(e) => setJsonText(e.target.value)}
+                    placeholder="Tempelkan (Paste) raw JSON string di sini..."
+                    rows={6}
+                    className="w-full p-4 rounded-2xl bg-slate-950/80 border border-white/10 text-xs font-mono text-slate-200 placeholder-slate-600 focus:outline-none focus:border-pink-500 transition-colors"
+                  />
+                  {jsonText && (
+                    <button
+                      onClick={() => setJsonText("")}
+                      className="absolute top-3 right-3 p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-400 text-xs"
+                    >
+                      Bersihkan
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => handleParse()}
+                  className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#E1306C] via-[#FD1D1D] to-[#FCB045] text-white font-bold text-sm hover:opacity-95 transition-all shadow-xl shadow-pink-500/20 flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  <span>Parse Data & Tampilkan Feed Grid</span>
+                </button>
+              </div>
+            )}
+
+            {/* OUTPUT SECTION: PROFILE HEADER & INTERACTIVE MEDIA GRID */}
+            {parseResult && (
+              <div className="space-y-6 pt-4 border-t border-white/10 animate-fade-in">
+                {!parseResult.success ? (
+                  <div className="p-8 rounded-3xl border border-rose-500/30 bg-rose-500/10 text-center space-y-2 max-w-xl mx-auto">
+                    <svg className="w-12 h-12 text-rose-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                    <h3 className="text-base font-bold text-white">Parsing Gagal</h3>
+                    <p className="text-xs text-slate-300">{parseResult.error}</p>
+                  </div>
+                ) : (
+                  <>
+                    {/* PROFILE OVERVIEW CARD */}
+                    <div className="glass-card rounded-3xl p-6 border border-white/10 flex flex-col md:flex-row items-center justify-between gap-6">
+                      <div className="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left">
+                        <div className="w-20 h-20 rounded-full p-[3px] bg-gradient-to-tr from-[#833AB4] via-[#FD1D1D] to-[#FCB045] shrink-0 shadow-lg shadow-pink-500/20">
+                          <img
+                            src={parseResult.profile.avatarUrl}
+                            alt={parseResult.profile.username}
+                            className="w-full h-full rounded-full object-cover bg-slate-950"
+                            onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400'; }}
+                          />
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-center sm:justify-start gap-2">
+                            <h2 className="text-xl font-bold font-display text-white">@{parseResult.profile.username}</h2>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold border border-emerald-500/30">Parsed</span>
+                          </div>
+                          <p className="text-xs font-medium text-slate-300 mt-0.5">{parseResult.profile.fullName}</p>
+                          <p className="text-xs text-slate-400 mt-1 line-clamp-2 max-w-lg">{parseResult.profile.biography}</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-6 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6 text-center">
+                        <div>
+                          <p className="text-xl font-extrabold font-display text-white">{parseResult.media.length}</p>
+                          <p className="text-[11px] text-slate-400">Parsed Feed</p>
+                        </div>
+                        <div>
+                          <p className="text-xl font-extrabold font-display text-pink-400">{selectedIds.length}</p>
+                          <p className="text-[11px] text-slate-400">Terpilih</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* FILTER & CONTROL TOOLBAR */}
+                    <div className="glass-card rounded-2xl p-4 border border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
+                      
+                      {/* Media Type Filters */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
+                        {["ALL", "IMAGE", "VIDEO", "CAROUSEL"].map((t) => (
+                          <button
+                            key={t}
+                            onClick={() => setFilter(t)}
+                            className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${
+                              filter === t
+                                ? "bg-pink-500 text-white shadow-md shadow-pink-500/30"
+                                : "bg-white/5 text-slate-400 hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            {t === "ALL" ? "Semua Media" : t}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Search & Bulk Select Actions */}
+                      <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+                        <input
+                          type="text"
+                          placeholder="Cari caption / shortcode..."
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          className="px-3.5 py-1.5 rounded-xl bg-slate-950 border border-white/10 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-pink-500 w-full sm:w-48"
+                        />
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={selectAllFiltered}
+                            className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-medium transition-colors"
+                          >
+                            Pilih Semua
+                          </button>
+                          <button
+                            onClick={clearAllSelection}
+                            className="px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-rose-400 text-xs font-medium transition-colors"
+                          >
+                            Bersihkan
+                          </button>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* MEDIA GRID DISPLAY */}
+                    {filteredMedia.length === 0 ? (
+                      <div className="p-12 text-center text-slate-500 text-xs">
+                        Tidak ada media yang cocok dengan filter.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+                        {filteredMedia.map((item) => {
+                          const isSelected = selectedIds.includes(item.id);
+                          return (
+                            <div
+                              key={item.id}
+                              onClick={() => toggleSelect(item.id)}
+                              className={`group relative aspect-square rounded-2xl overflow-hidden cursor-pointer border transition-all duration-300 ${
+                                isSelected
+                                  ? "border-pink-500 ring-2 ring-pink-500/50 scale-[0.98]"
+                                  : "border-white/10 bg-slate-900/40 hover:border-white/30"
+                              }`}
+                            >
+                              {/* Media Image */}
+                              <img
+                                src={item.displayUrl}
+                                alt={item.caption || "Instagram Post"}
+                                className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                                loading="lazy"
+                                onError={(e) => { e.target.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800'; }}
+                              />
+
+                              {/* Selection Indicator */}
+                              <div className="absolute top-3 left-3 z-10">
+                                <div
+                                  className={`w-6 h-6 rounded-lg border flex items-center justify-center transition-all ${
+                                    isSelected
+                                      ? "bg-pink-500 border-pink-500 text-white"
+                                      : "border-white/50 bg-black/40 backdrop-blur-sm group-hover:border-white"
+                                  }`}
+                                >
+                                  {isSelected && (
+                                    <svg className="w-4 h-4 stroke-[3]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Badge */}
+                              <div className="absolute top-3 right-3 z-10 px-2.5 py-1 rounded-full bg-black/60 backdrop-blur-md text-white text-[10px] font-semibold flex items-center gap-1 border border-white/10">
+                                {item.type === "IMAGE" && <span className="text-pink-400">📷 Photo</span>}
+                                {item.type === "VIDEO" && <span className="text-blue-400">🎥 Video</span>}
+                                {item.type === "CAROUSEL" && <span className="text-amber-400">🖼️ Carousel</span>}
+                              </div>
+
+                              {/* Hover Details */}
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
+                                <p className="text-xs text-slate-200 line-clamp-2 mb-2 font-light">{item.caption || "Tidak ada caption"}</p>
+                                <div className="flex items-center justify-between text-[11px] text-slate-300">
+                                  <div className="flex items-center gap-3">
+                                    <span>❤️ {(item.likeCount / 1000).toFixed(1)}k</span>
+                                    <span>💬 {item.commentCount}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedPreviewItem(item);
+                                      }}
+                                      className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white transition-colors"
+                                      title="Inspect Item"
+                                    >
+                                      🔍
+                                    </button>
+                                    <button
+                                      onClick={(e) => handleSingleDownload(e, item)}
+                                      className="p-1.5 rounded-lg bg-white/20 hover:bg-pink-500 text-white transition-colors"
+                                      title="Unduh Satuan"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                                      </svg>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+          </main>
+
+          {/* FLOATING BULK DOWNLOAD BAR */}
+          {selectedIds.length > 0 && (
+            <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-2xl animate-fade-in">
+              <div className="p-4 rounded-3xl border border-white/20 bg-slate-900/90 backdrop-blur-2xl shadow-2xl shadow-pink-950/50 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-pink-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400 font-extrabold text-sm">
+                    {selectedIds.length}
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white">Media Terpilih</h4>
+                    <p className="text-[10px] text-slate-400">Siap diunduh sebagai arsip .ZIP</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={clearAllSelection}
+                    disabled={isDownloading}
+                    className="p-2.5 rounded-xl border border-white/10 hover:bg-white/10 text-slate-400 hover:text-rose-400 transition-colors"
+                    title="Batalkan Pilihan"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                  </button>
+
+                  <button
+                    onClick={downloadBatchZip}
+                    disabled={isDownloading}
+                    className="px-6 py-2.5 rounded-2xl bg-gradient-to-r from-[#E1306C] via-[#FD1D1D] to-[#FCB045] text-white font-bold text-xs hover:opacity-95 transition-all flex items-center gap-2 shadow-lg shadow-pink-500/30 disabled:opacity-50"
+                  >
+                    {isDownloading ? (
+                      <>
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Memproses ZIP ({downloadProgress}%)</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                        </svg>
+                        <span>Unduh Batch ZIP</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MEDIA INSPECT MODAL */}
+          {selectedPreviewItem && (
+            <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+              <div className="glass-card rounded-3xl border border-white/10 w-full max-w-xl p-6 space-y-4 animate-fade-in">
+                <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <span>🔍 Details Post Shortcode:</span>
+                    <span className="text-pink-400 font-mono">{selectedPreviewItem.shortcode}</span>
+                  </h3>
+                  <button
+                    onClick={() => setSelectedPreviewItem(null)}
+                    className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div className="aspect-video rounded-2xl overflow-hidden bg-slate-950 border border-white/10 flex items-center justify-center">
+                  <img src={selectedPreviewItem.displayUrl} className="w-full h-full object-contain" />
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <p className="font-semibold text-slate-300">Caption:</p>
+                  <p className="p-3 rounded-xl bg-slate-950/80 border border-white/5 text-slate-300 font-light max-h-32 overflow-y-auto leading-relaxed">
+                    {selectedPreviewItem.caption || "Tidak ada caption"}
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <div className="text-xs text-slate-400">
+                    Type: <span className="text-pink-400 font-semibold">{selectedPreviewItem.type}</span>
+                  </div>
+                  <a
+                    href={selectedPreviewItem.downloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-4 py-2 rounded-xl bg-pink-500 hover:bg-pink-600 text-white font-bold text-xs flex items-center gap-2 transition-all shadow-lg shadow-pink-500/25"
+                  >
+                    <span>Buka Media Original ➔</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* HISTORY MODAL */}
+          {showHistoryModal && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+              <div className="glass-card rounded-3xl border border-white/10 w-full max-w-xl p-6 space-y-4 animate-fade-in">
+                <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span className="text-pink-400">🕒</span> Riwayat Ekstraksi Lokal
+                  </h3>
+                  <button
+                    onClick={() => setShowHistoryModal(false)}
+                    className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {savedHistory.length === 0 ? (
+                  <p className="text-center py-8 text-xs text-slate-500">Belum ada riwayat ekstraksi lokal tersimpan.</p>
+                ) : (
+                  <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                    {savedHistory.map((item) => (
+                      <div
+                        key={item.id}
+                        onClick={() => {
+                          setJsonText(item.rawJson);
+                          handleParse(item.rawJson);
+                          setShowHistoryModal(false);
+                        }}
+                        className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/5 hover:border-pink-500/50 cursor-pointer flex items-center justify-between transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          <img src={item.profile.avatarUrl} className="w-9 h-9 rounded-full object-cover" />
+                          <div>
+                            <p className="text-xs font-bold text-white">@{item.profile.username}</p>
+                            <p className="text-[10px] text-slate-400">{item.itemCount} items • {item.parsedAt}</p>
+                          </div>
+                        </div>
+                        <span className="text-xs font-semibold text-pink-400 hover:underline">Buka ➔</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* FOOTER */}
+          <footer className="border-t border-white/5 py-6 text-center text-xs text-slate-500">
+            <p>InstaVault Pro v2.0 • Zero-Server Client-Side Media Ingestion Architecture</p>
+          </footer>
+
+        </div>
+      );
+    }
+
+    // Mount Application
+    const rootElement = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+  </script>
+</body>
+</html>
