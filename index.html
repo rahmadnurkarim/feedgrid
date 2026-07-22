@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>InstaVault Pro - Instagram Feed & Media Extractor</title>
+  <title>InstaVault Pro - Full Profile Instagram Extractor & Downloader</title>
   
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -60,13 +60,13 @@
       background: rgba(225, 48, 108, 0.6);
     }
     .glass-card {
-      background: rgba(15, 23, 42, 0.7);
+      background: rgba(15, 23, 42, 0.75);
       backdrop-filter: blur(16px);
       -webkit-backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.08);
     }
     .glass-nav {
-      background: rgba(9, 13, 22, 0.85);
+      background: rgba(9, 13, 22, 0.88);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -92,7 +92,6 @@
   <script type="text/babel">
     const { useState, useEffect, useMemo, useRef } = React;
 
-    // Canvas Image to Blob Converter for Cross-Origin Downloads
     function urlToBlobViaCanvas(url) {
       return new Promise((resolve, reject) => {
         const img = new Image();
@@ -117,7 +116,6 @@
       });
     }
 
-    // Helper for Clipboard Copying in iFrame/Sandbox Environments
     const copyTextToClipboard = (textToCopy) => {
       try {
         const textArea = document.createElement("textarea");
@@ -136,142 +134,268 @@
       }
     };
 
-    // --- CONSOLE SCRAPER SCRIPT ENGINE (VERSION 3.0) ---
-    const CONSOLE_SCRAPER_SCRIPT = `(function extractInstagramFeedPayload() {
-  try {
-    console.log("%c[InstaVault Pro 3.0]%c Memulai ekstraksi data feed mendalam...", "color: #E1306C; font-weight: bold; font-size: 14px;", "color: #fff;");
-    
-    let rawItems = [];
-    let profileData = { username: "unknown", fullName: "", biography: "", avatarUrl: "", postsCount: 0 };
+    const CONSOLE_SCRAPER_SCRIPT = `(async function extractAllProfileFeedPosts() {
+  const MAX_TARGET_ITEMS = 10000;
+  console.log("%c[InstaVault Pro 5.0 Ultra]%c Starting Ultra Profile Scraper (Target Max: " + MAX_TARGET_ITEMS + " posts)...", "color: #E1306C; font-weight: bold; font-size: 14px;", "color: #fff;");
 
-    function deepSearch(obj, keyToFind, maxDepth = 10, currentDepth = 0) {
-      if (!obj || currentDepth > maxDepth || typeof obj !== 'object') return [];
-      let results = [];
-      if (Array.isArray(obj)) {
-        for (const item of obj) {
-          results = results.concat(deepSearch(item, keyToFind, maxDepth, currentDepth + 1));
-        }
-      } else {
-        for (const k in obj) {
-          if (k === keyToFind && obj[k]) {
-            results.push(obj[k]);
-          }
-          if (typeof obj[k] === 'object' && obj[k] !== null) {
-            results = results.concat(deepSearch(obj[k], keyToFind, maxDepth, currentDepth + 1));
-          }
-        }
-      }
-      return results;
-    }
+  // Prevent multiple widgets or modals
+  const oldWidget = document.getElementById('instavault-collector-widget');
+  if (oldWidget) oldWidget.remove();
+  const oldModal = document.getElementById('instavault-result-modal');
+  if (oldModal) oldModal.remove();
 
+  // Create Overlay Control Widget on Instagram page
+  const widget = document.createElement('div');
+  widget.id = 'instavault-collector-widget';
+  widget.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:999999;background:#0f172a;border:2px solid #e1306c;color:#fff;padding:18px 22px;border-radius:18px;box-shadow:0 12px 30px rgba(0,0,0,0.85);font-family:sans-serif;font-size:13px;width:340px;';
+  widget.innerHTML = \`
+    <div style="font-weight:bold;font-size:15px;margin-bottom:6px;color:#e1306c;display:flex;align-items:center;justify-content:space-between;">
+      <span>📸 InstaVault Pro v5.0 Ultra</span>
+      <span id="iv-status-dot" style="width:10px;height:10px;border-radius:50%;background:#00ff66;display:inline-block;box-shadow:0 0 8px #00ff66;"></span>
+    </div>
+    <div style="color:#cbd5e1;margin-bottom:10px;font-size:12px;">Scraping... Klik tombol di bawah kapan saja untuk <b>Pause & Ekstrak JSON</b>.</div>
+    <div style="background:#1e293b;padding:10px 14px;border-radius:10px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+      <span style="font-size:12px;color:#94a3b8;">Terkumpul:</span>
+      <div>
+        <span id="iv-count" style="color:#fcb045;font-size:18px;font-weight:bold;">0</span>
+        <span style="color:#64748b;font-size:12px;"> / 10.000</span>
+      </div>
+    </div>
+    <div style="background:#334155;border-radius:6px;height:6px;width:100%;overflow:hidden;margin-bottom:12px;">
+      <div id="iv-progress-bar" style="background:linear-gradient(90deg, #e1306c, #fcb045);height:100%;width:0%;transition:width 0.3s;"></div>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button id="iv-stop-btn" style="flex:1;background:linear-gradient(135deg, #e1306c, #fd1d1d);color:#fff;border:none;padding:12px;border-radius:10px;font-weight:bold;cursor:pointer;font-size:13px;box-shadow:0 4px 12px rgba(225,48,108,0.4);">⏸️ Pause & Ekstrak JSON Sekarang</button>
+    </div>
+  \`;
+  document.body.appendChild(widget);
+
+  const countEl = document.getElementById('iv-count');
+  const progressBarEl = document.getElementById('iv-progress-bar');
+  const stopBtn = document.getElementById('iv-stop-btn');
+
+  let isCollecting = true;
+  let resolveSleep = null;
+  const itemsMap = new Map();
+
+  const interruptibleSleep = (ms) => new Promise(r => {
+    resolveSleep = r;
+    setTimeout(r, ms);
+  });
+
+  stopBtn.onclick = () => {
+    isCollecting = false;
+    if (resolveSleep) resolveSleep();
+  };
+
+  function getProfileData() {
+    let p = { username: "unknown", fullName: "", biography: "", avatarUrl: "", postsCount: 0 };
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     if (pathParts.length > 0 && !["explore", "reels", "direct", "stories", "p", "tv"].includes(pathParts[0])) {
-      profileData.username = pathParts[0];
+      p.username = pathParts[0];
     }
-
-    const scripts = Array.from(document.querySelectorAll('script'));
-    for (const script of scripts) {
-      if (!script.textContent) continue;
-      
-      if (script.type === 'application/json' || script.textContent.includes('edge_owner_to_timeline_media') || script.textContent.includes('xdt_api') || script.textContent.includes('profile_pic_url')) {
-        try {
-          const parsed = JSON.parse(script.textContent);
-          
-          const users = deepSearch(parsed, 'user');
-          for (const u of users) {
-            if (u && (u.username || u.full_name)) {
-              profileData.username = u.username || profileData.username;
-              profileData.fullName = u.full_name || profileData.fullName || "";
-              profileData.biography = u.biography || profileData.biography || "";
-              profileData.avatarUrl = u.profile_pic_url_hd || u.profile_pic_url || profileData.avatarUrl;
-              profileData.postsCount = u.edge_owner_to_timeline_media?.count || u.media_count || profileData.postsCount;
-              break;
-            }
-          }
-
-          const edgesList = deepSearch(parsed, 'edge_owner_to_timeline_media');
-          for (const edgeObj of edgesList) {
-            if (edgeObj?.edges && edgeObj.edges.length > 0) {
-              rawItems = rawItems.concat(edgeObj.edges);
-            }
-          }
-
-          if (rawItems.length === 0) {
-            const xdtFeeds = deepSearch(parsed, 'xdt_api__v1__feed__user_timeline_graphql_connection');
-            for (const xdt of xdtFeeds) {
-              if (xdt?.edges && xdt.edges.length > 0) {
-                rawItems = rawItems.concat(xdt.edges);
-              }
-            }
-          }
-
-          if (rawItems.length === 0) {
-            const itemsList = deepSearch(parsed, 'items');
-            for (const it of itemsList) {
-              if (Array.isArray(it) && it.length > 0 && (it[0]?.code || it[0]?.pk || it[0]?.id)) {
-                rawItems = rawItems.concat(it.map(node => ({ node })));
-              }
-            }
-          }
-        } catch (e) {}
-      }
+    const metaBio = document.querySelector('meta[property="og:description"]');
+    if (metaBio && metaBio.content) {
+      p.biography = metaBio.content;
     }
-
-    if (rawItems.length === 0) {
-      const mediaElements = Array.from(document.querySelectorAll('img[src*="cdninstagram"], video[src*="cdninstagram"], img[src*="fbcdn"], video[src*="fbcdn"]'));
-      const domItems = [];
-      mediaElements.forEach((el, index) => {
-        const isVideo = el.tagName.toLowerCase() === 'video';
-        const src = el.src || el.currentSrc;
-        if (src && !src.includes('150x150') && !src.includes('448x448') && !src.includes('profile_pic')) {
-          domItems.push({
-            node: {
-              id: 'dom_item_' + index,
-              shortcode: 'post_' + (index + 1),
-              is_video: isVideo,
-              display_url: src,
-              video_url: isVideo ? src : null,
-              edge_media_to_caption: { edges: [{ node: { text: el.alt || ("Instagram Post Media #" + (index + 1)) } }] },
-              edge_liked_by: { count: 0 },
-              edge_media_to_comment: { count: 0 },
-              taken_at_timestamp: Math.floor(Date.now() / 1000)
-            }
-          });
-        }
-      });
-      if (domItems.length > 0) rawItems = domItems;
+    const metaImg = document.querySelector('meta[property="og:image"]');
+    if (metaImg && metaImg.content) {
+      p.avatarUrl = metaImg.content;
     }
-
-    const payload = {
-      instavaultVersion: "3.0",
-      extractedAt: new Date().toISOString(),
-      profile: profileData,
-      items: rawItems
-    };
-
-    const jsonString = JSON.stringify(payload, null, 2);
-    
-    if (rawItems.length === 0) {
-      alert("⚠️ Belum ada feed media yang terdeteksi.\\n\\nTips: Scroll halaman profil Instagram ke bawah sedikit agar foto/video dimuat ke browser, lalu jalankan script ini kembali di Console!");
-    } else {
-      navigator.clipboard.writeText(jsonString).then(() => {
-        console.log(\`%c[SUCCESS]%c \${rawItems.length} media feed (@\${profileData.username}) berhasil disalin ke Clipboard!\`, "color: #00FF66; font-weight: bold;", "color: #fff;");
-        alert(\`🎉 BERHASIL! \${rawItems.length} media feed dari @\${profileData.username} telah disalin ke Clipboard.\\n\\nSilakan kembali ke InstaVault Pro dan Paste di kotak JSON!\`);
-      }).catch(() => {
-        console.log(jsonString);
-        alert(\`🎉 BERHASIL! \${rawItems.length} item media ditemukan. Silakan salin teks JSON dari Console.\`);
-      });
-    }
-
-  } catch (err) {
-    console.error("[InstaVault Scraper Error]:", err);
-    alert("❌ Terjadi kesalahan saat ekstraksi. Coba scroll halaman Instagram lalu jalankan ulang script.");
+    return p;
   }
+
+  function collectFromPage() {
+    // 1. Scan JSON script tags
+    const scripts = Array.from(document.querySelectorAll('script'));
+    for (const s of scripts) {
+      if (!s.textContent || (!s.textContent.includes('display_url') && !s.textContent.includes('display_resources') && !s.textContent.includes('image_versions2'))) continue;
+      try {
+        const text = s.textContent;
+        const matches = text.match(/\\{[^{}]*"shortcode"[^{}]*\\}/g) || [];
+        for (const m of matches) {
+          if (itemsMap.size >= MAX_TARGET_ITEMS) break;
+          try {
+            const obj = JSON.parse(m);
+            if (obj.shortcode && (obj.display_url || obj.display_src)) {
+              itemsMap.set(obj.shortcode, {
+                node: {
+                  id: obj.id || 'sc_' + obj.shortcode,
+                  shortcode: obj.shortcode,
+                  is_video: !!obj.is_video,
+                  display_url: obj.display_url || obj.display_src,
+                  video_url: obj.video_url || null,
+                  edge_media_to_caption: { edges: [{ node: { text: obj.caption || "" } }] },
+                  edge_liked_by: { count: obj.edge_liked_by?.count || obj.like_count || 0 },
+                  edge_media_to_comment: { count: obj.edge_media_to_comment?.count || obj.comment_count || 0 },
+                  taken_at_timestamp: obj.taken_at_timestamp || Math.floor(Date.now() / 1000)
+                }
+              });
+            }
+          } catch(e) {}
+        }
+      } catch (e) {}
+    }
+
+    // 2. Scan DOM Elements (Images & Links)
+    const links = Array.from(document.querySelectorAll('a[href*="/p/"], a[href*="/reel/"]'));
+    links.forEach((a) => {
+      if (itemsMap.size >= MAX_TARGET_ITEMS) return;
+      const parts = a.getAttribute('href').split('/').filter(Boolean);
+      const code = parts[parts.length - 1];
+      const img = a.querySelector('img');
+      if (code && img && img.src && !itemsMap.has(code)) {
+        itemsMap.set(code, {
+          node: {
+            id: 'dom_' + code,
+            shortcode: code,
+            is_video: a.getAttribute('href').includes('/reel/'),
+            display_url: img.src,
+            edge_media_to_caption: { edges: [{ node: { text: img.alt || ("Instagram Post " + code) } }] },
+            edge_liked_by: { count: 0 },
+            edge_media_to_comment: { count: 0 },
+            taken_at_timestamp: Math.floor(Date.now() / 1000)
+          }
+        });
+      }
+    });
+
+    const count = Math.min(itemsMap.size, MAX_TARGET_ITEMS);
+    if (countEl) countEl.innerText = count.toLocaleString('id-ID');
+    if (progressBarEl) progressBarEl.style.width = Math.min((count / MAX_TARGET_ITEMS) * 100, 100) + '%';
+  }
+
+  // Initial collection
+  collectFromPage();
+
+  let noNewItemsCount = 0;
+  let lastSize = itemsMap.size;
+
+  // Auto-scroll loop up to 10,000 items
+  while (isCollecting && itemsMap.size < MAX_TARGET_ITEMS && noNewItemsCount < 25) {
+    window.scrollTo(0, document.body.scrollHeight);
+    
+    const waitDelay = itemsMap.size > 2000 ? 1800 : 1200;
+    await interruptibleSleep(waitDelay);
+
+    if (!isCollecting) break;
+
+    collectFromPage();
+
+    if (itemsMap.size === lastSize) {
+      noNewItemsCount++;
+    } else {
+      noNewItemsCount = 0;
+      lastSize = itemsMap.size;
+    }
+  }
+
+  // Finalize payload creation
+  const finalItems = Array.from(itemsMap.values()).slice(0, MAX_TARGET_ITEMS);
+  const profile = getProfileData();
+
+  const payload = {
+    instavaultVersion: "5.0 Ultra",
+    extractedAt: new Date().toISOString(),
+    maxLimit: MAX_TARGET_ITEMS,
+    profile: profile,
+    items: finalItems
+  };
+
+  const jsonString = JSON.stringify(payload, null, 2);
+
+  // Remove small collector widget
+  if (widget) widget.remove();
+
+  // Print payload to DevTools console
+  console.log("%c[InstaVault Pro Result Payload]%c", "color: #e1306c; font-weight: bold; font-size: 16px;", "color: #fff;");
+  console.log(jsonString);
+
+  // Display Result Modal with Direct Action Buttons (bypasses browser async gesture blocks)
+  const modal = document.createElement('div');
+  modal.id = 'instavault-result-modal';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(9,13,22,0.92);backdrop-filter:blur(10px);z-index:999999;display:flex;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;font-family:sans-serif;';
+  modal.innerHTML = \`
+    <div style="background:#0f172a;border:1px solid rgba(225,48,108,0.4);border-radius:24px;width:100%;max-width:650px;padding:24px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.7);color:#fff;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;border-bottom:1px solid #1e293b;padding-bottom:12px;">
+        <div>
+          <h3 style="margin:0;font-size:18px;color:#e1306c;font-weight:bold;">🎉 Ekstraksi Selesai / Di-Pause</h3>
+          <p style="margin:4px 0 0 0;font-size:12px;color:#94a3b8;">Berhasil mengumpulkan <b>\${finalItems.length.toLocaleString('id-ID')} postingan</b> dari @\${profile.username}</p>
+        </div>
+        <button id="iv-modal-close" style="background:#1e293b;border:none;color:#94a3b8;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;">✕</button>
+      </div>
+
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:12px;color:#cbd5e1;margin-bottom:6px;font-weight:600;">Data JSON Output (Teks terpisah otomatis):</label>
+        <textarea id="iv-json-textarea" readonly style="width:100%;height:200px;background:#020617;border:1px solid #334155;border-radius:12px;color:#38bdf8;font-family:monospace;font-size:11px;padding:12px;box-sizing:border-box;resize:none;outline:none;"></textarea>
+      </div>
+
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button id="iv-btn-copy" style="flex:1;min-width:160px;background:linear-gradient(135deg, #e1306c, #fd1d1d);color:#fff;border:none;padding:12px 16px;border-radius:12px;font-weight:bold;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;box-shadow:0 4px 12px rgba(225,48,108,0.4);">
+          📋 Salin JSON ke Clipboard
+        </button>
+        <button id="iv-btn-download" style="flex:1;min-width:160px;background:#1e293b;border:1px solid #334155;color:#f8fafc;padding:12px 16px;border-radius:12px;font-weight:bold;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;">
+          💾 Unduh File .JSON
+        </button>
+      </div>
+      <div id="iv-copy-status" style="margin-top:10px;font-size:12px;text-align:center;color:#00ff66;display:none;"></div>
+    </div>
+  \`;
+  document.body.appendChild(modal);
+
+  const jsonTextarea = document.getElementById('iv-json-textarea');
+  jsonTextarea.value = jsonString;
+  jsonTextarea.focus();
+  jsonTextarea.select();
+
+  const btnCopy = document.getElementById('iv-btn-copy');
+  const btnDownload = document.getElementById('iv-btn-download');
+  const copyStatus = document.getElementById('iv-copy-status');
+  const btnClose = document.getElementById('iv-modal-close');
+
+  btnCopy.onclick = () => {
+    jsonTextarea.focus();
+    jsonTextarea.select();
+    let success = false;
+    try {
+      success = document.execCommand('copy');
+    } catch(e) {}
+    if (!success) {
+      try {
+        navigator.clipboard.writeText(jsonString);
+        success = true;
+      } catch(e) {}
+    }
+    copyStatus.style.display = 'block';
+    if (success) {
+      copyStatus.style.color = '#00ff66';
+      copyStatus.innerText = '✅ Berhasil disalin ke Clipboard! Silakan buka InstaVault Pro & Paste di kotak JSON.';
+    } else {
+      copyStatus.style.color = '#fcb045';
+      copyStatus.innerText = '⚠️ Teks telah di-highlight. Silakan tekan Ctrl+C (atau Cmd+C) pada keyboard untuk menyalin!';
+    }
+  };
+
+  btnDownload.onclick = () => {
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = \`instavault_\${profile.username}_\${finalItems.length}_posts.json\`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    copyStatus.style.display = 'block';
+    copyStatus.style.color = '#38bdf8';
+    copyStatus.innerText = '💾 File .JSON diunduh! Silakan unggah (Upload) file tersebut di InstaVault Pro.';
+  };
+
+  btnClose.onclick = () => modal.remove();
 })();`;
 
-    // --- DEMO PAYLOAD DATA ---
     const DEMO_PAYLOAD = {
-      instavaultVersion: "3.0",
+      instavaultVersion: "4.0",
       extractedAt: new Date().toISOString(),
       profile: {
         username: "natgeo_expeditions",
@@ -334,7 +458,6 @@
       ]
     };
 
-    // --- JSON PARSER UTILITY FUNCTION ---
     function parseInstagramJson(jsonInput) {
       try {
         if (!jsonInput || typeof jsonInput !== "string") {
@@ -393,7 +516,7 @@
         if (!rawEdges || rawEdges.length === 0) {
           return {
             success: false,
-            error: "Struktur JSON terdeteksi tetapi tidak ditemukan item media feed (edge_owner_to_timeline_media / items)."
+            error: "Struktur JSON terdeteksi tetapi tidak ditemukan item media feed."
           };
         }
 
@@ -446,7 +569,7 @@
       } catch (err) {
         return {
           success: false,
-          error: `Gagal mengurai file JSON: ${err.message}. Pastikan file merupakan format JSON valid dari Instagram.`
+          error: `Gagal mengurai file JSON: ${err.message}. Pastikan file merupakan format JSON valid.`
         };
       }
     }
@@ -484,7 +607,7 @@
         const isCopied = copyTextToClipboard(CONSOLE_SCRAPER_SCRIPT);
         if (isCopied) {
           setCopiedSnippet(true);
-          showToast("✅ Snippet Script berhasil disalin ke Clipboard!");
+          showToast("✅ Snippet Script v4.0 (Full Profile) berhasil disalin!");
           setTimeout(() => setCopiedSnippet(false), 2500);
         } else {
           showToast("⚠️ Gagal menyalin otomatis. Silakan salin manual dari kotak teks.");
@@ -566,14 +689,12 @@
         setSelectedIds([]);
       };
 
-      // --- HIGH PERFORMANCE SINGLE DOWNLOAD ENGINE ---
       const handleSingleDownload = async (e, item) => {
         if (e && e.stopPropagation) e.stopPropagation();
         showToast(`⏳ Memproses unduhan ${item.shortcode}...`);
 
         const filename = `instavault_${item.shortcode}.${item.type === "VIDEO" ? "mp4" : "jpg"}`;
 
-        // Attempt 1: Fetch binary as Blob directly and trigger Blob URL download
         try {
           const res = await fetch(item.downloadUrl, { mode: 'cors' });
           if (res.ok) {
@@ -586,14 +707,11 @@
             a.click();
             document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-            showToast(`✅ Unduhan berhasil dimulai: ${item.shortcode}`);
+            showToast(`✅ Unduhan berhasil: ${item.shortcode}`);
             return;
           }
-        } catch (fetchErr) {
-          console.warn("Direct fetch blob failed, trying canvas rendering fallback...", fetchErr);
-        }
+        } catch (fetchErr) {}
 
-        // Attempt 2: Canvas rendering fallback for images
         if (item.type !== "VIDEO") {
           try {
             const blob = await urlToBlobViaCanvas(item.displayUrl);
@@ -605,23 +723,15 @@
             a.click();
             document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
-            showToast(`✅ Unduhan media berhasil dimulai: ${item.shortcode}`);
+            showToast(`✅ Unduhan media berhasil: ${item.shortcode}`);
             return;
-          } catch (canvasErr) {
-            console.warn("Canvas conversion fallback failed:", canvasErr);
-          }
+          } catch (canvasErr) {}
         }
 
-        // Attempt 3: Direct fallback opening in new tab
-        const win = window.open(item.downloadUrl, '_blank');
-        if (win) {
-          showToast(`ℹ️ Membuka media di tab baru. Klik kanan & pilih 'Simpan Gambar/Video Sebagai'`);
-        } else {
-          showToast(`⚠️ Pop-up terblokir! Gunakan tombol 'Buka Media Original' di Detail Item.`);
-        }
+        window.open(item.downloadUrl, '_blank');
+        showToast(`ℹ️ Membuka link media di tab baru.`);
       };
 
-      // --- ADVANCED CLIENT-SIDE BATCH ZIP DOWNLOAD ENGINE ---
       const downloadBatchZip = async () => {
         if (selectedIds.length === 0) return;
 
@@ -644,26 +754,17 @@
 
             let fetchedBlob = null;
 
-            // Strategy A: Direct Fetch
             try {
               const response = await fetch(item.downloadUrl, { mode: 'cors' });
-              if (response.ok) {
-                fetchedBlob = await response.blob();
-              }
-            } catch (e) {
-              console.warn("Direct fetch failed in batch zip for:", item.shortcode);
-            }
+              if (response.ok) fetchedBlob = await response.blob();
+            } catch (e) {}
 
-            // Strategy B: Canvas Fallback for Images
             if (!fetchedBlob && item.type !== "VIDEO") {
               try {
                 fetchedBlob = await urlToBlobViaCanvas(item.displayUrl);
-              } catch (e) {
-                console.warn("Canvas fallback failed in batch zip for:", item.shortcode);
-              }
+              } catch (e) {}
             }
 
-            // Store result in ZIP
             if (fetchedBlob) {
               folder.file(filename, fetchedBlob);
               successCount++;
@@ -688,9 +789,8 @@
           setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
 
           setDownloadProgress(100);
-          showToast(`🎉 Unduhan ZIP Selesai! (${successCount}/${total} file media berhasil dikemas)`);
+          showToast(`🎉 Unduhan ZIP Selesai! (${successCount}/${total} file media dikemas)`);
         } catch (err) {
-          console.error("ZIP Generation Error:", err);
           showToast("❌ Terjadi kesalahan saat membuat file ZIP.");
         } finally {
           setTimeout(() => {
@@ -725,9 +825,9 @@
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-lg font-extrabold font-display tracking-tight text-white">InstaVault</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-400 border border-pink-500/30 uppercase tracking-wider">PRO 3.0</span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-pink-500/20 text-pink-400 border border-pink-500/30 uppercase tracking-wider">PRO 4.0 FULL</span>
                   </div>
-                  <p className="text-[10px] text-slate-400 hidden sm:block">Client-Side Media Extractor & Downloader</p>
+                  <p className="text-[10px] text-slate-400 hidden sm:block">Full Profile Auto-Scroll Extractor & Downloader</p>
                 </div>
               </div>
 
@@ -747,7 +847,7 @@
 
                 <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-medium">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                  <span>Zero-Server Mode Active</span>
+                  <span>Target Max: 10.000 Postingan</span>
                 </div>
               </div>
 
@@ -759,10 +859,10 @@
             {/* HERO SECTION */}
             <div className="text-center max-w-3xl mx-auto space-y-3">
               <h1 className="text-3xl sm:text-5xl font-extrabold font-display text-white tracking-tight leading-tight">
-                Ekstrak Feed Instagram <span className="gradient-text">Bebas Blokir</span>
+                Ekstrak <span className="gradient-text">Hingga 10.000 Postingan</span> Profile Instagram
               </h1>
               <p className="text-xs sm:text-sm text-slate-300 font-light leading-relaxed">
-                Lewati login-wall & IP limit Instagram. Jalankan <strong>Console Script</strong> di browser Anda lalu upload/paste hasilnya untuk mengunduh semua photo, video & carousel resolusi asli.
+                Tanpa batas postingan! Gunakan <strong>Console Scraper v5.0 Ultra</strong> yang secara dinamis melakukan perguliran (auto-scroll) untuk mengumpulkan seluruh arsip feed hingga 10.000 media sekaligus.
               </p>
             </div>
 
@@ -794,21 +894,21 @@
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                   </svg>
-                  <span>Method 2: Console Script Generator</span>
+                  <span>Method 2: Auto-Scroll Console Script (v4.0)</span>
                 </button>
               </div>
             </div>
 
-            {/* TAB CONTENT: CONSOLE SNIPPET GENERATOR */}
+            {}
             {activeTab === "CONSOLE" && (
               <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/10 space-y-6 max-w-4xl mx-auto animate-fade-in">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
                   <div>
                     <h3 className="text-lg font-bold font-display text-white flex items-center gap-2">
-                      <span className="p-2 rounded-xl bg-pink-500/20 text-pink-400">💻</span>
-                      Console Scraper Generator (v3.0)
+                      <span className="p-2 rounded-xl bg-pink-500/20 text-pink-400">⚡</span>
+                      Auto-Scroll Full Profile Collector (v4.0)
                     </h3>
-                    <p className="text-xs text-slate-400 mt-1">Eksekusi snippet ini di DevTools browser saat membuka profil Instagram publik target.</p>
+                    <p className="text-xs text-slate-400 mt-1">Skrip ini akan otomatis melakukan scroll halaman profil hingga akhir untuk mengumpulkan SEMUA postingan.</p>
                   </div>
                   <button
                     onClick={handleCopySnippet}
@@ -817,27 +917,27 @@
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
                     </svg>
-                    <span>{copiedSnippet ? "Tersalin!" : "Salin Kode Console"}</span>
+                    <span>{copiedSnippet ? "Tersalin!" : "Salin Kode Auto-Scroll v4.0"}</span>
                   </button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                   <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
                     <div className="w-6 h-6 rounded-lg bg-pink-500/20 text-pink-400 font-bold flex items-center justify-center">1</div>
-                    <p className="font-semibold text-white">Buka Instagram Target</p>
-                    <p className="text-slate-400">Buka profil Instagram publik & scroll sedikit ke bawah agar postingan dimuat.</p>
+                    <p className="font-semibold text-white">Buka Profil Instagram</p>
+                    <p className="text-slate-400">Buka halaman profil Instagram target di tab browser Anda.</p>
                   </div>
 
                   <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
                     <div className="w-6 h-6 rounded-lg bg-pink-500/20 text-pink-400 font-bold flex items-center justify-center">2</div>
-                    <p className="font-semibold text-white">Buka DevTools Console</p>
-                    <p className="text-slate-400">Tekan <code className="px-1 py-0.5 rounded bg-white/10 text-pink-300">F12</code> atau Inspect ➔ tab Console.</p>
+                    <p className="font-semibold text-white">Jalankan Script di Console</p>
+                    <p className="text-slate-400">Tekan <code className="px-1 py-0.5 rounded bg-white/10 text-pink-300">F12</code> ➔ Tab Console ➔ Paste & Enter.</p>
                   </div>
 
                   <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
                     <div className="w-6 h-6 rounded-lg bg-pink-500/20 text-pink-400 font-bold flex items-center justify-center">3</div>
-                    <p className="font-semibold text-white">Paste & Eksekusi</p>
-                    <p className="text-slate-400">Paste kode script di bawah, tekan Enter. JSON akan otomatis tersalin!</p>
+                    <p className="font-semibold text-white">Biarkan Auto-Scroll Berjalan</p>
+                    <p className="text-slate-400">Widget khusus akan muncul menghitung postingan secara live hingga selesai!</p>
                   </div>
                 </div>
 
@@ -849,13 +949,13 @@
               </div>
             )}
 
-            {/* TAB CONTENT: JSON INPUT & FILE UPLOADER */}
+            {}
             {activeTab === "JSON" && (
               <div className="glass-card rounded-3xl p-6 sm:p-8 border border-white/10 space-y-5 max-w-4xl mx-auto animate-fade-in">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div>
                     <h3 className="text-base font-bold font-display text-white">Input Payload JSON Feed</h3>
-                    <p className="text-xs text-slate-400">Unggah file .json atau tempelkan raw string JSON dari Console Script.</p>
+                    <p className="text-xs text-slate-400">Unggah file .json atau tempelkan raw string JSON hasil ekstraksi v4.0.</p>
                   </div>
 
                   <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -902,11 +1002,12 @@
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
                   </svg>
-                  <span>Parse Data & Tampilkan Feed Grid</span>
+                  <span>Parse Data & Tampilkan Full Feed Grid</span>
                 </button>
               </div>
             )}
 
+            {}
             {parseResult && (
               <div className="space-y-6 pt-4 border-t border-white/10 animate-fade-in">
                 {!parseResult.success ? (
@@ -933,7 +1034,7 @@
                         <div>
                           <div className="flex items-center justify-center sm:justify-start gap-2">
                             <h2 className="text-xl font-bold font-display text-white">@{parseResult.profile.username}</h2>
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold border border-emerald-500/30">Parsed</span>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-semibold border border-emerald-500/30">v4.0 Full Profile</span>
                           </div>
                           <p className="text-xs font-medium text-slate-300 mt-0.5">{parseResult.profile.fullName}</p>
                           <p className="text-xs text-slate-400 mt-1 line-clamp-2 max-w-lg">{parseResult.profile.biography}</p>
@@ -943,7 +1044,7 @@
                       <div className="flex items-center gap-6 border-t md:border-t-0 md:border-l border-white/10 pt-4 md:pt-0 md:pl-6 text-center">
                         <div>
                           <p className="text-xl font-extrabold font-display text-white">{parseResult.media.length}</p>
-                          <p className="text-[11px] text-slate-400">Parsed Feed</p>
+                          <p className="text-[11px] text-slate-400">Total Postingan</p>
                         </div>
                         <div>
                           <p className="text-xl font-extrabold font-display text-pink-400">{selectedIds.length}</p>
@@ -1090,6 +1191,7 @@
 
           </main>
 
+          {}
           {selectedIds.length > 0 && (
             <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-2xl animate-fade-in">
               <div className="p-4 rounded-3xl border border-white/20 bg-slate-900/90 backdrop-blur-2xl shadow-2xl shadow-pink-950/50 flex items-center justify-between gap-4">
@@ -1142,6 +1244,7 @@
             </div>
           )}
 
+          {}
           {selectedPreviewItem && (
             <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
               <div className="glass-card rounded-3xl border border-white/10 w-full max-w-xl p-6 space-y-4 animate-fade-in">
@@ -1197,7 +1300,7 @@
             </div>
           )}
 
-          {/* HISTORY MODAL */}
+          {}
           {showHistoryModal && (
             <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
               <div className="glass-card rounded-3xl border border-white/10 w-full max-w-xl p-6 space-y-4 animate-fade-in">
@@ -1245,14 +1348,13 @@
 
           {/* FOOTER */}
           <footer className="border-t border-white/5 py-6 text-center text-xs text-slate-500">
-            <p>InstaVault Pro v3.0 • Zero-Server Client-Side Media Ingestion Architecture</p>
+            <p>InstaVault Pro v4.0 • Zero-Server Client-Side Auto-Scroll Ingestion Architecture</p>
           </footer>
 
         </div>
       );
     }
 
-    // Mount Application
     const rootElement = document.getElementById('root');
     const root = ReactDOM.createRoot(rootElement);
     root.render(<App />);
